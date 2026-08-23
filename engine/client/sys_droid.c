@@ -783,8 +783,11 @@ static int FTEDroid_MainThread(void *arg)
 		{
 			if (Key_Dest_Has(kdm_console|kdm_message))
 				t |= 1;
-			if (!Key_Dest_Has(~kdm_game) && cls.state == ca_disconnected)
-				t |= 1;
+			//upstream also raises the keyboard whenever the game view has focus while
+			//disconnected, on the assumption there is nothing to do but type. That is
+			//true of a bare engine, but this port has menus and on-screen controls, and
+			//the state is briefly ca_disconnected while a connection is being made -- so
+			//it threw the keyboard up over the game every time you joined a server.
 			if (sys_osk.ival)
 				t |= 2;
 		}
