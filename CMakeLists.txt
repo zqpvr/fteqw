@@ -833,6 +833,7 @@ SET(FTE_CLIENT_FILES
 	engine/client/r_part.c
 	engine/client/r_partset.c
 	engine/client/r_surf.c
+	engine/client/r_swrt.c
 	engine/client/renderer.c
 	engine/client/renderque.c
 	engine/client/roq_read.c

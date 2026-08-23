@@ -761,6 +761,10 @@ void Renderer_Init(void)
 	Cmd_AddCommand("vid_reload", R_ReloadRenderer_f);
 	Cmd_AddCommand("vid_toggle", R_ToggleFullscreen_f);
 
+#ifdef SWRT
+	SWRT_Init();
+#endif
+
 #ifdef RTLIGHTS
 	R_EditLights_RegisterCommands();
 #endif

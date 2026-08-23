@@ -33,6 +33,7 @@
 #define PSET_CLASSIC			//support the 'classic' particle system, for that classic quake feel.
 #define PSET_SCRIPT				//scriptable particles (both fte's and importing effectinfo)
 #define RTLIGHTS
+#define SWRT		//software raytracing acceleration structure (r_swrt.c)
 #define RUNTIMELIGHTING			//automatic generation of .lit files
 #define R_XFLIP					//old silly thing
 

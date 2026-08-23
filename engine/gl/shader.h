@@ -1052,6 +1052,15 @@ void Sh_RegisterCvars(void);
 void R_EditLights_DrawLights(void);	//3d light previews
 void R_EditLights_DrawInfo(void);	//2d light info display.
 void R_EditLights_RegisterCommands(void);
+
+#ifdef SWRT
+//software raytracing acceleration structure (r_swrt.c)
+void SWRT_Init(void);
+void SWRT_Shutdown(void);
+qboolean SWRT_Build(struct model_s *mod);
+int SWRT_NumTriangles(void);
+int SWRT_NumNodes(void);
+#endif
 //
 #ifdef BEF_PUSHDEPTH
 void GLBE_PolyOffsetStencilShadow(qboolean foobar);
