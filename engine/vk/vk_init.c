@@ -1187,9 +1187,12 @@ void	VK_Draw_Shutdown(void)
 
 static void VK_DestroySampler(VkSampler s)
 {
-	struct vksamplers_s *ref;
-	for (ref = vk.samplers; ref; ref = ref->next)
+	struct vksamplers_s *ref, *next;
+	//step to the next entry before the body runs: the last usage frees ref, and
+	//the loop increment would then read ref->next back out of freed memory.
+	for (ref = vk.samplers; ref; ref = next)
 	{
+		next = ref->next;
 		if (ref->samp == s)
 		{
 			if (--ref->usages == 0)
