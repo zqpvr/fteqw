@@ -21,6 +21,11 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 //	private static native void oncreate(String bindir, String basedir, byte[] savedstate);
 	static
 	{
+		//Load the bundled GnuTLS (TLS/DTLS for the online broker) up front. FTE's net_ssl_gnutls
+		//backend dlopen()s "libgnutls.so" lazily, but a bare dlopen by name can fail to locate an
+		//app-bundled lib; System.loadLibrary resolves it via the app's lib path, after which FTE's
+		//dlopen just gets the already-loaded handle. Optional, so don't let its absence be fatal.
+		try { System.loadLibrary("gnutls"); } catch (Throwable t) { android.util.Log.w("FTEDroid", "gnutls not loaded: " + t); }
 		System.loadLibrary("ftedroid");	//registers the methods properly.
 	}
 
@@ -91,21 +96,210 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 
 //		byte[] nativeSavedState = savedInstanceState != null
 //			? savedInstanceState.getByteArray(KEY_NATIVE_SAVED_STATE) : null;
-		startup(getAbsolutePath(getExternalFilesDir(null)), getNativeLibraryDirectory());
+		//Bundled game data ships inside the APK (assets/nzp). Extract it to the writable data
+		//dir on first run (or when the bundled version changes) BEFORE startup() so the engine
+		//finds it. Fast no-op once installed (version-file check). The render surface is only
+		//created after onCreate returns, so doing this here keeps startup ordering correct.
+		String dataPath = getAbsolutePath(getExternalFilesDir(null));
+		try { extractGameData(dataPath); } catch (Exception e) { e.printStackTrace(); }
+
+		startup(dataPath, getNativeLibraryDirectory());
 		handleIntent(getIntent());
 
-//		if (Build.VERSION.SDK_INT >= 19)
-//		{
-//			int flags = 0;
-//			flags |= 4096/*SYSTEM_UI_FLAG_IMMERSIVE_STICKY, api 19*/;
-//			flags |= 4/*SYSTEM_UI_FLAG_FULLSCREEN, api 16*/;
-//			flags |= 2/*SYSTEM_UI_FLAG_HIDE_NAVIGATION, api 14*/;			
-//			mNativeContentView.setSystemUiVisibility(flags); /*api 11*/
-//		}
+		//Let the game draw into the display-cutout (camera notch) area in landscape so it
+		//genuinely fills the screen, then go immersive-fullscreen (hide status/nav bars).
+		if (android.os.Build.VERSION.SDK_INT >= 28)
+		{
+			WindowManager.LayoutParams lp = getWindow().getAttributes();
+			lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+			getWindow().setAttributes(lp);
+		}
+		setFullscreen();
 
 		super.onCreate(savedInstanceState);
+
+		//Volume keys should drive the media stream (the game mixes through STREAM_MUSIC), so the
+		//slider that pops up matches what actually gets louder/quieter.
+		setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
+
+		audioStart();
 	}
-	
+
+	//Immersive fullscreen: hide the status + navigation bars. STICKY lets a swipe reveal them
+	//transiently. setSystemUiVisibility is deprecated but still the most broadly-compatible way.
+	private void setFullscreen()
+	{
+		try
+		{
+			getWindow().getDecorView().setSystemUiVisibility(
+				  0x00000004	//SYSTEM_UI_FLAG_FULLSCREEN
+				| 0x00000002	//SYSTEM_UI_FLAG_HIDE_NAVIGATION
+				| 0x00001000	//SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+				| 0x00000100	//SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+				| 0x00000200	//SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+				| 0x00000400);	//SYSTEM_UI_FLAG_LAYOUT_STABLE
+		}
+		catch (Throwable t) {}
+	}
+	@Override public void onWindowFocusChanged(boolean hasFocus)
+	{
+		super.onWindowFocusChanged(hasFocus);
+		if (hasFocus)	//re-assert immersive mode whenever focus returns (it gets reset by dialogs, etc.)
+			setFullscreen();
+	}
+
+	//Copies assets/nzp/** out of the APK into <dataPath>/nzp on first run (or when the bundled
+	//version differs). The engine reads loose files from the data dir, so this makes a fully
+	//self-contained APK. Reads the APK zip directly - fast and handles AGP asset compression.
+	private void extractGameData(String dataPath) throws Exception
+	{
+		if (dataPath == null)
+			return;
+		final String prefix = "assets/nzp/";
+		java.util.zip.ZipFile zip = new java.util.zip.ZipFile(getPackageCodePath());
+		try
+		{
+			//skip extraction if already installed at the same version
+			String bundledVer = readZipString(zip, prefix + "version.txt");
+			java.io.File verFile = new java.io.File(dataPath, "nzp/version.txt");
+			if (bundledVer != null && verFile.exists() && bundledVer.equals(readFileString(verFile)))
+				return;
+			android.util.Log.i("FTEDroid", "extracting bundled game data...");
+			byte[] buf = new byte[65536];
+			java.util.Enumeration<? extends java.util.zip.ZipEntry> en = zip.entries();
+			while (en.hasMoreElements())
+			{
+				java.util.zip.ZipEntry ze = en.nextElement();
+				String name = ze.getName();
+				if (!name.startsWith(prefix))
+					continue;
+				java.io.File out = new java.io.File(dataPath, name.substring("assets/".length()));
+				if (ze.isDirectory()) { out.mkdirs(); continue; }
+				if (out.getParentFile() != null) out.getParentFile().mkdirs();
+				java.io.InputStream is = zip.getInputStream(ze);
+				java.io.FileOutputStream os = new java.io.FileOutputStream(out);
+				int n;
+				while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+				os.close();
+				is.close();
+			}
+			android.util.Log.i("FTEDroid", "game data extracted.");
+		}
+		finally { zip.close(); }
+	}
+	private static String readZipString(java.util.zip.ZipFile zip, String entry) throws Exception
+	{
+		java.util.zip.ZipEntry ze = zip.getEntry(entry);
+		if (ze == null) return null;
+		return streamToString(zip.getInputStream(ze));
+	}
+	private static String readFileString(java.io.File f) throws Exception
+	{
+		return streamToString(new java.io.FileInputStream(f));
+	}
+	private static String streamToString(java.io.InputStream is) throws Exception
+	{
+		java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+		byte[] b = new byte[4096]; int n;
+		while ((n = is.read(b)) > 0) bo.write(b, 0, n);
+		is.close();
+		return bo.toString("UTF-8").trim();
+	}
+
+	//audio: FTENativeActivity's frame loop runs in native code, so (unlike FTEDroidActivity)
+	//there is no Java-side per-frame trigger to start playback. This thread polls the engine's
+	//audio parameters and begins streaming once the sound device is up.
+	private audiothreadclass audiothread;
+	private class audiothreadclass extends Thread
+	{
+		volatile boolean timetodie;
+		@Override
+		public void run()
+		{
+			byte[] audbuf = new byte[2048];
+			android.media.AudioTrack at = null;
+			while (!timetodie && at == null)
+			{
+				int sspeed = FTEDroidEngine.audioinfo(0);
+				int schannels = FTEDroidEngine.audioinfo(1);
+				int sbits = FTEDroidEngine.audioinfo(2);
+				if (sspeed <= 0)
+				{
+					try { Thread.sleep(100); } catch (InterruptedException e) {}
+					continue;
+				}
+				try
+				{
+					int chans = (schannels >= 2) ? android.media.AudioFormat.CHANNEL_OUT_STEREO : android.media.AudioFormat.CHANNEL_OUT_MONO;
+					int enc = (sbits == 8) ? android.media.AudioFormat.ENCODING_PCM_8BIT : android.media.AudioFormat.ENCODING_PCM_16BIT;
+					int minbuf = android.media.AudioTrack.getMinBufferSize(sspeed, chans, enc);
+					//Low audio latency: the old 2*getMinBufferSize buffer with no perf hint was ~160ms.
+					//On API 26+ request the fast/low-latency path (the engine already outputs 48kHz =
+					//device native) with a small buffer of a few native bursts (~20ms) instead.
+					if (android.os.Build.VERSION.SDK_INT >= 26)
+					{
+						int framebytes = (schannels >= 2 ? 2 : 1) * (sbits == 8 ? 1 : 2);
+						int sz = Math.max(minbuf, 4096);
+						try {
+							android.media.AudioManager am = (android.media.AudioManager)getSystemService(android.content.Context.AUDIO_SERVICE);
+							int nf = Integer.parseInt(am.getProperty(android.media.AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER));
+							if (nf > 0) sz = Math.max(nf * framebytes * 4, 4096);	//~4 native bursts, >= one audbuf write
+						} catch (Throwable t) {}
+						at = new android.media.AudioTrack.Builder()
+							.setAudioAttributes(new android.media.AudioAttributes.Builder()
+								.setUsage(android.media.AudioAttributes.USAGE_GAME)
+								.setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+							.setAudioFormat(new android.media.AudioFormat.Builder()
+								.setSampleRate(sspeed).setChannelMask(chans).setEncoding(enc).build())
+							.setBufferSizeInBytes(sz)
+							.setPerformanceMode(android.media.AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+							.setTransferMode(android.media.AudioTrack.MODE_STREAM)
+							.build();
+					}
+					else
+						at = new android.media.AudioTrack(android.media.AudioManager.STREAM_MUSIC, sspeed, chans, enc, 2 * minbuf, android.media.AudioTrack.MODE_STREAM);
+					at.play();
+				}
+				catch (Throwable e) { return; }
+			}
+			if (at == null) return;
+			while (!timetodie)
+			{
+				int avail = FTEDroidEngine.paintaudio(audbuf, audbuf.length);
+				if (avail > 0)
+					at.write(audbuf, 0, avail);
+			}
+			at.stop();
+			at.release();
+		}
+		public void killoff()
+		{
+			timetodie = true;
+			try { join(); } catch (InterruptedException e) {}
+		}
+	};
+	private void audioStart()
+	{
+		if (audiothread == null)
+		{
+			audiothread = new audiothreadclass();
+			audiothread.start();
+		}
+	}
+	private void audioStop()
+	{
+		if (audiothread != null)
+		{
+			audiothread.killoff();
+			audiothread = null;
+		}
+	}
+	@Override protected void onDestroy()
+	{
+		audioStop();
+		super.onDestroy();
+	}
+
 	//random helpers
 	private void handleIntent(android.content.Intent intent)
 	{
@@ -263,7 +457,19 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 	@Override
 	public boolean dispatchKeyEvent(KeyEvent event)
 	{	//needed because AKeyEvent_getUnicode is missing completely.
+		//Let the system handle the volume keys so Android changes the volume AND shows its slider
+		//overlay. Otherwise we consume every key below (return true) and volume control is dead.
+		switch (event.getKeyCode())
+		{
+		case KeyEvent.KEYCODE_VOLUME_UP:
+		case KeyEvent.KEYCODE_VOLUME_DOWN:
+		case KeyEvent.KEYCODE_VOLUME_MUTE:
+			return super.dispatchKeyEvent(event);
+		}
 		int act = event.getAction();
+		//Tag gamepad input with a non-zero device id so the game (CSQC) detects a controller
+		//(it keys glyph prompts and aim assist off devid>0). in_forceseat routes it to player 1.
+		int kdev = ((event.getSource() & (SOURCE_GAMEPAD|SOURCE_JOYSTICK)) != 0) ? 1 : 0;
 		if (act == KeyEvent.ACTION_DOWN)
 		{
 			int metastate = event.getMetaState();
@@ -273,12 +479,12 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 			if (unichar == 0)
 				unichar = event.getDisplayLabel();
 
-			keypress(event.getDeviceId(), true, event.getKeyCode(), unichar);
+			keypress(kdev, true, event.getKeyCode(), unichar);
 			return true;
 		}
 		else if (act == KeyEvent.ACTION_UP)
 		{
-			keypress(event.getDeviceId(), false, event.getKeyCode(), 0);
+			keypress(kdev, false, event.getKeyCode(), 0);
 			return true;
 		}
 		else
@@ -335,7 +541,7 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 		try
 		{
 			MotionEvent_getAxisValueJ = MotionEvent.class.getMethod("getAxisValue", int.class); //api12
-			InputDevice_getMotionRange = InputDevice.class.getMethod("getMotionRange", int.class); //api12
+			InputDevice_getMotionRange = InputDevice.class.getMethod("getMotionRange", int.class, int.class); //api12 - the (axis,source) overload; it's invoked with two args, so registering the 1-arg version made every call throw
 			AXIS_X = (Integer)MotionEvent.class.getField("AXIS_X").get(null);
 			AXIS_Y = (Integer)MotionEvent.class.getField("AXIS_Y").get(null);
 			AXIS_LTRIGGER = (Integer)MotionEvent.class.getField("AXIS_LTRIGGER").get(null);
@@ -359,14 +565,42 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 			if (range != null)
 			{
 				final float flat = range.getFlat();
-				float v = (Float)MotionEvent_getAxisValueJ.invoke(event, aaxis, 0);
+				float v = (Float)MotionEvent_getAxisValueJ.invoke(event, aaxis);	//getAxisValue(int) takes ONE arg; the stray second arg threw IllegalArgumentException every call, silently killing all controller axes
 				if (Math.abs(v) < flat)
 					v = 0;	//read as 0 if its within the deadzone.
-				axis(event.getDeviceId(), qaxis, v);
+				axis(1, qaxis, v);	//devid 1 = "a controller" (see dispatchKeyEvent)
 			}
 		}
 		catch(Exception e)
 		{
+		}
+	}
+	//Convert the D-pad hat axis to K_GP_DPAD_* key events (down/up edges). keypress() runs the
+	//keycode through mapkey(), so KEYCODE_DPAD_* becomes K_GP_DPAD_* just like a real button.
+	private int hatX = 0, hatY = 0;
+	private void handleHat(MotionEvent event)
+	{
+		int devid = 1;	//D-pad is controller input (see dispatchKeyEvent)
+		float hx, hy;
+		try { hx = event.getAxisValue(MotionEvent.AXIS_HAT_X); hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y); }
+		catch (Throwable t) { return; }
+		int nx = (hx < -0.5f) ? -1 : (hx > 0.5f ? 1 : 0);
+		int ny = (hy < -0.5f) ? -1 : (hy > 0.5f ? 1 : 0);
+		if (nx != hatX)
+		{
+			if (hatX < 0) keypress(devid, false, KeyEvent.KEYCODE_DPAD_LEFT, 0);
+			else if (hatX > 0) keypress(devid, false, KeyEvent.KEYCODE_DPAD_RIGHT, 0);
+			if (nx < 0) keypress(devid, true, KeyEvent.KEYCODE_DPAD_LEFT, 0);
+			else if (nx > 0) keypress(devid, true, KeyEvent.KEYCODE_DPAD_RIGHT, 0);
+			hatX = nx;
+		}
+		if (ny != hatY)
+		{
+			if (hatY < 0) keypress(devid, false, KeyEvent.KEYCODE_DPAD_UP, 0);
+			else if (hatY > 0) keypress(devid, false, KeyEvent.KEYCODE_DPAD_DOWN, 0);
+			if (ny < 0) keypress(devid, true, KeyEvent.KEYCODE_DPAD_UP, 0);
+			else if (ny > 0) keypress(devid, true, KeyEvent.KEYCODE_DPAD_DOWN, 0);
+			hatY = ny;
 		}
 	}
 	private boolean motionEvent(MotionEvent event)
@@ -387,6 +621,10 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 			handleJoystickAxis(event, dev, AXIS_Z, 3);
 			handleJoystickAxis(event, dev, AXIS_RZ, 4);
 			handleJoystickAxis(event, dev, AXIS_RTRIGGER, 5);
+
+			//gamepad D-pads usually arrive as a hat axis, not key events; NZ:P binds menu
+			//navigation and "use/buy" to the D-pad, so synthesize K_GP_DPAD_* key presses.
+			handleHat(event);
 
 			return true;
 		}

@@ -1040,6 +1040,8 @@ IF(ANDROID)
 			${FTE_ARCH_FILES}
 			${FTE_COMMON_FILES}
 			${FTE_CLIENT_FILES}
+			${FTE_SERVER_FILES}	#NZ:P is single-player and runs a listen server, so the client references SV_*/sv/svs. Include the server sources.
+			engine/common/net_ssl_gnutls.c	#TLS/DTLS backend for the online broker (guarded by HAVE_GNUTLS; dlopen's the bundled libgnutls.so)
 		)
 		SET_TARGET_PROPERTIES(ftedroid PROPERTIES COMPILE_DEFINITIONS "${FTE_LIB_DEFINES};${FTE_DEFINES};${FTE_REVISON}")
 		TARGET_INCLUDE_DIRECTORIES(ftedroid PUBLIC ${FTE_INCLUDES})

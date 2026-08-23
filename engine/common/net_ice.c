@@ -744,7 +744,11 @@ static struct icestate_s *QDECL ICE_Create(void *module, const char *conname, co
 	con->blockcandidates = true;	//until offers/answers are sent.
 
 #ifdef HAVE_DTLS
-	con->dtlspassive = (proto == ICEP_QWSERVER);	//note: may change later.
+	//Android: always take the DTLS *server* (passive) role, even when we're the one joining.
+	//GnuTLS-as-server interops with every peer, whereas FTE's Windows SChannel DTLS *server* is
+	//broken (see bothdefs.h FIXME), so a Windows host can never be the DTLS server for us. By being
+	//passive ourselves we force the peer to be the DTLS client (both GnuTLS and SChannel clients work).
+	con->dtlspassive = true;	//was: (proto == ICEP_QWSERVER)
 
 	if (mode == ICEM_WEBRTC)
 	{	//dtls+sctp is a mandatory part of our connection, sadly.
@@ -2680,7 +2684,9 @@ static qboolean QDECL ICE_Get(struct icestate_s *con, const char *prop, char *va
 					Q_strncatz(value, va("a=setup:active\n"), valuelen);
 			}
 			else if (!strcmp(prop, "sdpoffer"))
-				Q_strncatz(value, va("a=setup:actpass\n"), valuelen);	//don't care if we're active or passive
+				//Android forces passive (we're the DTLS server) instead of "actpass": the peer (host)
+				//must then be the DTLS client, avoiding FTE's broken SChannel DTLS-server path.
+				Q_strncatz(value, va("a=setup:%s\n", con->dtlspassive?"passive":"active"), valuelen);
 		}
 #endif
 

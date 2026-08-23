@@ -7,7 +7,7 @@ java code has a function or two which just periodically calls us to ask us to du
 #include <pthread.h>
 
 static soundcardinfo_t *sys_sc = NULL;
-extern int sys_soundflags;
+int sys_soundflags;	//read by the Java audio code via JNI; define it here (the fork lost the definition, leaving only this extern)
 
 //called by the java code when it wants to know what sort of AudioTrack format to use.
 JNIEXPORT jint JNICALL Java_com_fteqw_FTEDroidEngine_audioinfo(JNIEnv *env, jclass this, jint arg)

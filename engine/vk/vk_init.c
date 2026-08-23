@@ -729,7 +729,13 @@ static qboolean VK_CreateSwapChain(void)
 		}
 
 		swapinfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-		swapinfo.preTransform = surfcaps.currentTransform;//VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+		//Android panels report a 90/270 currentTransform; using it as preTransform without
+		//rotating our rendering leaves the image visibly rotated. Prefer IDENTITY when the
+		//surface supports it (the compositor then presents upright) and fall back otherwise.
+		if (surfcaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+			swapinfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+		else
+			swapinfo.preTransform = surfcaps.currentTransform;
 		if (surfcaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
 			swapinfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 		else if (surfcaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
@@ -4231,7 +4237,7 @@ void VK_DoPresent(struct vkframe *theframe)
 	}
 	{
 		RSpeedMark();
-		if (err)
+		if (err && err != VK_SUBOPTIMAL_KHR)	//SUBOPTIMAL is expected with our IDENTITY preTransform; treat as success rather than rebuilding the swapchain
 		{
 			if (err == VK_SUBOPTIMAL_KHR)
 				Con_DPrintf("vkQueuePresentKHR: VK_SUBOPTIMAL_KHR\n");
@@ -4248,8 +4254,7 @@ void VK_DoPresent(struct vkframe *theframe)
 			err = vkAcquireNextImageKHR(vk.device, vk.swapchain, timeout, vk.acquiresemaphores[r], vk.acquirefences[r], &vk.acquirebufferidx[r]);
 			switch(err)
 			{
-			case VK_SUBOPTIMAL_KHR:	//success, but with a warning.
-				vk.neednewswapchain = true;
+			case VK_SUBOPTIMAL_KHR:	//success with a warning; expected with our IDENTITY preTransform on rotated Android panels, so don't rebuild the swapchain every frame.
 				vk.acquirelast++;
 				break;
 			case VK_SUCCESS:	//success
