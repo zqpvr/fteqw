@@ -214,6 +214,8 @@ static qboolean Init_GNUTLS(void)
 	#else
 		gnutls.hmod = Sys_LoadLibrary("libgnutls"GNUTLS_SOPREFIX".so."STRINGIFY(GNUTLS_SONUM), functable);
 	#endif
+	if (!gnutls.hmod)	//Android ships an unversioned libgnutls.so (APK libs can't carry a .so.NN
+		gnutls.hmod = Sys_LoadLibrary("libgnutls"GNUTLS_SOPREFIX".so", functable);	//soname); fall back to it.
 #else
 	gnutls.hmod = Sys_LoadLibrary("libgnutls"GNUTLS_SOPREFIX".so", functable);	//hope and pray
 #endif

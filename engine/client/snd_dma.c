@@ -1908,6 +1908,9 @@ static sounddriver_t *outputdrivers[] =
 	&MacOS_AudioOutput,	//prefered on mac
 #endif
 #ifdef ANDROID
+	&Droid_AudioOutput,	//AudioTrack via JNI. The OpenSL source isn't compiled into this
+						//build, so OSL_Output is an unusable weak symbol; without this the
+						//engine finds no audio driver ("Could not start audio device").
 	&OSL_Output,		//opensl(es)
 #endif
 #if defined(__MORPHOS__)

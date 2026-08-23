@@ -549,7 +549,9 @@ static void setCursorVisibility(jboolean visible)
 static void FTENativeActivity_keypress(JNIEnv *env, jobject this, jint devid, jboolean down, jint keycode, jint unicode)
 {
 	int qkeycode = mapkey(keycode);
-//	Sys_Printf("FTENativeActivity_keypress: d=%i s=%i a=%i,q=%i u=%i\n", devid, down, keycode, qkeycode, unicode);
+	//devid arrives normalised from Java: 0 = keyboard/system, 1 = gamepad. The game keys
+	//controller glyphs + aim assist off devid>0, and in_forceseat (set in the manifest)
+	//routes the non-zero devid back to player 1 instead of a non-existent split-screen seat.
 	if (devid < 0)
 		devid = 0;
 	IN_KeyEvent(devid, down, qkeycode, unicode);
@@ -602,10 +604,30 @@ static void FTENativeActivity_motion(JNIEnv *env, jobject this, jint ptrid, jint
 		break;
 	};
 }
+//Axis indices arriving here match fte's GPAXIS_* order (see the Java handleJoystickAxis
+//call order): 0=LeftX 1=LeftY 2=LeftTrigger 3=RightX 4=RightY 5=RightTrigger.
+//The SDL desktop build turns stick directions into K_GP_*_THUMB_* key presses so menus can
+//be navigated with the stick; the Android path didn't, which is why menus ignored the pad.
+//Stick directions -> K_GP_*_THUMB_* keys (like the SDL build). These have no in-game default
+//bind, so they don't disturb analog movement; NZ:P's menu handles them for stick navigation.
+static const int sys_axispos[6] = {K_GP_LEFT_THUMB_RIGHT, K_GP_LEFT_THUMB_DOWN, K_GP_LEFT_TRIGGER,  K_GP_RIGHT_THUMB_RIGHT, K_GP_RIGHT_THUMB_DOWN, K_GP_RIGHT_TRIGGER};
+static const int sys_axisneg[6] = {K_GP_LEFT_THUMB_LEFT,  K_GP_LEFT_THUMB_UP,   0,                  K_GP_RIGHT_THUMB_LEFT,  K_GP_RIGHT_THUMB_UP,   0};
+static unsigned int sys_axisbtn_pos, sys_axisbtn_neg;	//currently-held bit per axis
 static void FTENativeActivity_axis(JNIEnv *env, jobject this, jint devid, jint axis, jfloat value)
 {
 	if (devid < 0)
-		devid = 0;
+		devid = 1;	//Java tags controller axes with devid 1 (see keypress); in_forceseat routes to player 1
+	if (axis >= 0 && axis < 6)
+	{
+		unsigned int bit = 1u<<axis;
+		if (value > 0.5f && sys_axispos[axis])
+		{	if (!(sys_axisbtn_pos & bit)) { IN_KeyEvent(devid, true, sys_axispos[axis], 0); sys_axisbtn_pos |= bit; } }
+		else if (sys_axisbtn_pos & bit) { IN_KeyEvent(devid, false, sys_axispos[axis], 0); sys_axisbtn_pos &= ~bit; }
+
+		if (value < -0.5f && sys_axisneg[axis])
+		{	if (!(sys_axisbtn_neg & bit)) { IN_KeyEvent(devid, true, sys_axisneg[axis], 0); sys_axisbtn_neg |= bit; } }
+		else if (sys_axisbtn_neg & bit) { IN_KeyEvent(devid, false, sys_axisneg[axis], 0); sys_axisbtn_neg &= ~bit; }
+	}
 	IN_JoystickAxisEvent(devid, axis, value);
 }
 //static void FTENativeActivity_accelerometer(JNIEnv *env, jobject obj, jint devid, jfloat x, jfloat y, jfloat z)
@@ -643,6 +665,21 @@ static int FTEDroid_MainThread(void *arg)
 		parms.basedir = sys_basedir;	/*filled in later*/
 		parms.argc = read_apk_path(sys_basepak, sizeof(sys_basepak))?3:1;
 		parms.argv = args;
+		//Embed NZ:P's manifest (mirrors the desktop default.fmf). The desktop build reads this
+		//from a file; the Android build has no such file, so without this the engine used a
+		//default config name and never exec'd nzportable.cfg - the config that holds the proper
+		//controller binds/sensitivities and is where settings are saved. mainconfig fixes both
+		//the controller layout and settings persistence.
+		parms.manifest =
+			"game nzp\n"
+			"name \"Nazi Zombies Portable\"\n"
+			"basegame nzp\n"
+			"mainconfig \"nzportable.cfg\"\n"
+			"disablehomedir 1\n"
+			"set in_forceseat 1\n"		//all local input drives player 1 (we tag the pad as devid 1)
+			"-set in_aimassist 1\n";	//aim assist on by default (user-overridable)
+			//NB: controller binds live in nzportable.cfg, not here - manifest defaultoverrides
+			//run before the mainconfig, so binds set here would just get overwritten by it.
 #ifdef CONFIG_MANIFEST_TEXT
 		parms.manifest = CONFIG_MANIFEST_TEXT;
 #endif
@@ -700,7 +737,8 @@ static int FTEDroid_MainThread(void *arg)
 					sys_nativewindow = ANativeWindow_fromSurface(env, sys_cursurface);
 				else
 					sys_nativewindow = NULL;
-				ANativeWindow_acquire(sys_nativewindow);
+				if (sys_nativewindow)	//null on surface teardown; ANativeWindow_acquire(NULL) segfaults (mirrors the release guard below)
+					ANativeWindow_acquire(sys_nativewindow);
 			}
 
 			r_forceheadless = r_forcevidrestart&1;
@@ -1281,7 +1319,10 @@ static void FTENativeActivity_shutdown(JNIEnv *env, jobject this)
 //FIXME: we need a version of this that takes a byte array instead of a filename, for android's content gibberish.
 static void FTENativeActivity_openfile(JNIEnv *env, jobject this, jstring filename)
 {
-	const char *tmp = (*env)->GetStringUTFChars(env, filename, NULL);
+	const char *tmp;
+	if (!filename)
+		return;	//launcher intents carry no data URI, so getDataString() is null. CheckJNI aborts on GetStringUTFChars(null).
+	tmp = (*env)->GetStringUTFChars(env, filename, NULL);
 	if (tmp)
 	{
 		Sys_Printf("FTENativeActivity_openfile: %s\n", tmp);
