@@ -140,7 +140,42 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 				| 0x00000400);	//SYSTEM_UI_FLAG_LAYOUT_STABLE
 		}
 		catch (Throwable t) {}
+
+		setGestureExclusion();
 	}
+
+	//The system's back gesture owns a strip down each side of the screen, and a drag that
+	//starts there is taken away from us mid-touch: the app is told the finger left, which
+	//to a game holding a virtual stick looks like the player let go. Ask for those strips
+	//back. The system caps this at 200dp per edge and ignores anything beyond it, which is
+	//why this asks for the lower part of the screen rather than all of it -- that is where
+	//thumbs rest, and leaving the top usable means the gesture is still there when wanted.
+	private void setGestureExclusion()
+	{
+		try
+		{
+			if (android.os.Build.VERSION.SDK_INT < 29)
+				return;	//gesture navigation, and this call, arrived in Q
+
+			final android.view.View v = getWindow().getDecorView();
+			v.post(new Runnable() { public void run() {
+				try
+				{
+					int w = v.getWidth(), h = v.getHeight();
+					if (w <= 0 || h <= 0)
+						return;
+					int strip = (int)(200 * getResources().getDisplayMetrics().density);
+					if (strip > h) strip = h;
+					java.util.List<android.graphics.Rect> rects = new java.util.ArrayList<android.graphics.Rect>();
+					rects.add(new android.graphics.Rect(0, h - strip, w, h));
+					v.setSystemGestureExclusionRects(rects);
+				}
+				catch (Throwable t) {}
+			}});
+		}
+		catch (Throwable t) {}
+	}
+
 	@Override public void onWindowFocusChanged(boolean hasFocus)
 	{
 		super.onWindowFocusChanged(hasFocus);
@@ -669,6 +704,14 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 			}
 			else
 				motion(id, 2, x, y, 0, size);
+			break;
+		case MotionEvent.ACTION_CANCEL:
+			//The gesture was taken off us -- a system edge swipe, a call arriving.
+			//Every pointer is gone at once, and the id packed into the action is
+			//meaningless here, so release all of them. Without this they stay held
+			//down for good: a stuck movement stick, or a trigger that never lets go.
+			for (int p = 0; p < event.getPointerCount(); p++)
+				motion(event.getPointerId(p), 3, event.getX(p), event.getY(p), 0, event.getSize(p));
 			break;
 		case MotionEvent.ACTION_UP:
 		case MotionEvent.ACTION_POINTER_UP:
