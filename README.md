@@ -8,7 +8,7 @@ backend for years, but nothing was driving it: no modern build, no touch input,
 no way to reach the servers.
 
 This branch is what closed that gap. It is a fork rather than a patch file
-because engine work needs history — a ten-thousand-line diff regenerated after
+because engine work needs history. A ten-thousand-line diff regenerated after
 every edit has no blame, nothing to bisect, and no way to offer a single fix
 upstream.
 
@@ -32,59 +32,24 @@ Android panels report a rotated `currentTransform`, and using it as the
 pre-transform without rotating the rendering to match leaves the image sideways.
 Asking for IDENTITY makes the compositor present it upright instead. The
 `SUBOPTIMAL` result that follows is expected rather than a problem, so it counts
-as success — treating it as a failure rebuilt the swapchain every single frame.
+as success. Treating it as a failure rebuilt the swapchain every single frame.
 
 The DTLS change is what lets an Android client join a Windows host. FTE's
 SChannel backend cannot act as a DTLS *server*, and the roles are negotiated
 separately from who is hosting the game, so the Android side always offers
 `a=setup:passive` and forces the peer to be the client.
 
-## Bugs fixed
-
-Two use-after-frees, both upstream, both found by running on a device with ARM
-memory tagging switched on. Neither is Android-specific; they were simply never
-caught, because a freed block usually still holds the value being read. Memory
-tagging retags on free, so the next read faults immediately instead of quietly
-working.
-
-**`VK_DestroySampler`** walked the sampler list with the free inside the loop, so
-the loop increment read `ref->next` out of the block it had just freed. It fired
-on every launch, during the renderer restart where `Image_Shutdown` drops each
-texture and every one of them releases a sampler.
-
-**`CL_DownloadFinished`** copies two strings out of the download before calling
-`DL_Abort`, precisely because `DL_Abort` frees it — then read a third field from
-the freed struct eight lines later. It fired on every multiplayer join, since a
-server hands the client files to download as it connects.
-
-There is also an Android one: the touch dispatcher had no case for
-`ACTION_CANCEL`, which is what arrives when the system takes a gesture away or a
-call comes in. Those pointers were never released and stayed held down for good,
-which on a game with a virtual stick means it sticks.
-
-## Raytracing
-
-`r_swrt.c` builds a bounding volume hierarchy over the world's triangles, split
-on the middle of the widest axis, laid out as flat arrays so it can be handed to
-a shader as a storage buffer.
-
-The point is hardware that cannot do raytracing. FTE already traces shadow rays
-through `VK_KHR_ray_query`, but that needs raytracing units, and most phones do
-not have them — a Mali-G715 refuses the shader outright. Tracing in software
-needs an acceleration structure of our own, which is this.
-
-Nothing traces against it yet. It can be built and inspected on its own:
-
-```
-swrt_build
-```
-
-which reports triangle count, node count, tree depth, build time and memory.
+Touch input also brought two fixes that are not Android-specific. The dispatcher
+had no case for `ACTION_CANCEL`, so pointers taken away by a system gesture were
+never released and stayed held down. Separately, two use-after-frees were found
+by running under ARM memory tagging, one in the Vulkan sampler teardown and one
+in the download handler, both of which had gone unnoticed because a freed block
+usually still holds the value being read.
 
 ## Building
 
 Not built on its own. It is compiled as part of the Android app, which drives
-CMake and the NDK through Gradle — see
+CMake and the NDK through Gradle. See
 [nzportable-android](https://github.com/zqpvr/nzportable-android).
 
 The build config is `engine/common/config_nzportable.h`, which is where
