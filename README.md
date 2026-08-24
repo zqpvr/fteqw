@@ -1,41 +1,63 @@
-# Nazi Zombies: Portable FTEQW
-*"That magical Quake/QuakeWorld engine"*
+# Nazi Zombies: Portable FTEQW for Android
 
-## About
-This repository contains the source code for Spike's [Fore Thought Engine](https://fte.triptohell.info/about), featuring basic modifications specific to NZ:P such as parity changes for fog value interpretation, a custom configuration header, etc.
+The engine behind the Android port, and the changes that got it onto a phone.
 
-## Supported Platforms
-- [ ] Android†
-- [x] Linux 32-bit
-- [x] Linux 64-bit
-- [x] Linux ARMhf
-- [x] Linux ARM64
-- [ ] macOS†
-- [x] Windows 32-bit
-- [x] Windows 64-bit
+Upstream is [nzp-team/fteqw](https://github.com/nzp-team/fteqw), NZ:P's fork of
+Spike's [FTEQW](https://fte.triptohell.info/about). FTEQW has had an Android
+backend for years, but nothing was driving it: no modern build, no touch input,
+no way to reach the servers.
 
-## Building (Advanced)
-It is strongly recommended to use our Docker (via [image](https://hub.docker.com/r/motolegacy/fteqw) or [Dockerfile](https://github.com/nzp-team/tools/tree/main/fteqw-docker)) script to compile. It contains everything you would need to build on *any* supported platform, including cross compilers and an [osxcross](https://github.com/tpoechtrager/osxcross) environment for when compiling for macOS is complete.
+This branch is what closed that gap. It is a fork rather than a patch file
+because engine work needs history. A ten-thousand-line diff regenerated after
+every edit has no blame, nothing to bisect, and no way to offer a single fix
+upstream.
 
-### Compiling Quick-Start:
-```bash
-cd source/engine
-make makelibs FTE_TARGET=YOUR_TARGET && \
-make m-rel FTE_TARGET=YOUR_TARGET FTE_CONFIG=nzportable -j8
-```
+Used by [nzportable-android](https://github.com/zqpvr/nzportable-android), which
+is where the game code, the data and the APK live.
 
-Subtitute `YOUR_TARGET` with one of the following, for whatever platform you wish to build for:
-* `linux32`
-* `linux64`
-* `linux_armhf`
-* `linux_arm64`
-* `win32`
-* `win64`
+## What this fork changes
 
-You can view the [FTE Wiki](https://fte.triptohell.info/wiki/index.php/Compiling_FTEQW_For_Dummies#Understanding_Each_Build) for understanding what `m-rel` means and other options you can substitute the flag with.
+| Area | Change |
+| --- | --- |
+| Build | CMake wiring for an arm64 build driven by Gradle and a current NDK, instead of the dead `make droid` path |
+| Vulkan | Ask for an IDENTITY pre-transform where the surface allows it |
+| Audio | Output through the low-latency AudioTrack path |
+| Input | Touchscreen, controller and system keys plumbed through the Android glue |
+| Images | `stb_image` vendored, so the PNG menu artwork decodes |
+| Network | ICE always takes the DTLS server role |
+| Network | GnuTLS wired in for the TLS and DTLS the ICE broker requires |
 
-We also provide prebuilt binaries on the [Releases](https://github.com/nzp-team/fteqw/releases/tag/bleeding-edge) page.
+Android panels report a rotated `currentTransform`, and using it as the
+pre-transform without rotating the rendering to match leaves the image sideways.
+Asking for IDENTITY makes the compositor present it upright instead. The
+`SUBOPTIMAL` result that follows is expected rather than a problem, so it counts
+as success. Treating it as a failure rebuilt the swapchain every single frame.
 
-<hr>
+The DTLS change is what lets an Android client join a Windows host. FTE's
+SChannel backend cannot act as a DTLS *server*, and the roles are negotiated
+separately from who is hosting the game, so the Android side always offers
+`a=setup:passive` and forces the peer to be the client.
 
-†*We are not interested in supporting Android or other touch devices, nor macOS.*
+Touch input also brought two fixes that are not Android-specific. The dispatcher
+had no case for `ACTION_CANCEL`, so pointers taken away by a system gesture were
+never released and stayed held down. Separately, two use-after-frees were found
+by running under ARM memory tagging, one in the Vulkan sampler teardown and one
+in the download handler, both of which had gone unnoticed because a freed block
+usually still holds the value being read.
+
+## Building
+
+Not built on its own. It is compiled as part of the Android app, which drives
+CMake and the NDK through Gradle. See
+[nzportable-android](https://github.com/zqpvr/nzportable-android).
+
+The build config is `engine/common/config_nzportable.h`, which is where
+`RTLIGHTS` is switched on.
+
+Upstream's other platforms are untouched and should still build the way they
+always did, though nothing here tests them.
+
+## Licence
+
+GPL-2.0, the same as FTEQW, see [LICENSE](LICENSE). `engine/libs/stb_image.h` and
+`stb_image_write.h` are public domain.
