@@ -102,6 +102,7 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 		//created after onCreate returns, so doing this here keeps startup ordering correct.
 		String dataPath = getAbsolutePath(getExternalFilesDir(null));
 		try { extractGameData(dataPath); } catch (Exception e) { e.printStackTrace(); }
+		writeSafeArea(dataPath);
 
 		startup(dataPath, getNativeLibraryDirectory());
 		handleIntent(getIntent());
@@ -142,6 +143,50 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 		catch (Throwable t) {}
 
 		setGestureExclusion();
+	}
+
+	//The game draws edge to edge, into the camera cutout and the rounded corners, so its
+	//HUD, menus and touch buttons need to know how much of each short edge they cannot
+	//use. That is the deeper of the cutout and the corner radius, applied to both sides so
+	//the layout does not jump when the phone is turned around. It reaches the game code as
+	//cl_safearea, a share of the screen's width, through a config nzportable.cfg runs.
+	private void writeSafeArea(String dataPath)
+	{
+		float share = 0;
+		try
+		{
+			if (android.os.Build.VERSION.SDK_INT >= 30)
+			{
+				android.view.WindowMetrics metrics = getWindowManager().getMaximumWindowMetrics();
+				android.view.WindowInsets insets = metrics.getWindowInsets();
+				android.graphics.Rect bounds = metrics.getBounds();
+				int inset = 0;
+				android.view.DisplayCutout cutout = insets.getDisplayCutout();
+				if (cutout != null)
+					inset = Math.max(Math.max(cutout.getSafeInsetLeft(), cutout.getSafeInsetRight()),
+							Math.max(cutout.getSafeInsetTop(), cutout.getSafeInsetBottom()));
+				if (android.os.Build.VERSION.SDK_INT >= 31)
+				{
+					int[] corners = {android.view.RoundedCorner.POSITION_TOP_LEFT, android.view.RoundedCorner.POSITION_TOP_RIGHT,
+							android.view.RoundedCorner.POSITION_BOTTOM_LEFT, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT};
+					for (int c : corners)
+					{
+						android.view.RoundedCorner corner = insets.getRoundedCorner(c);
+						if (corner != null)
+							inset = Math.max(inset, corner.getRadius());
+					}
+				}
+				share = (float)inset / Math.max(bounds.width(), bounds.height());
+			}
+		}
+		catch (Throwable t) {}
+		try
+		{
+			java.io.FileWriter out = new java.io.FileWriter(new java.io.File(dataPath, "nzp/safearea.cfg"));
+			out.write("set cl_safearea " + share + "\n");
+			out.close();
+		}
+		catch (Exception e) {}
 	}
 
 	//The system's back gesture owns a strip down each side of the screen, and a drag that
