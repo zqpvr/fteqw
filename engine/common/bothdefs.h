@@ -39,7 +39,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifdef ANDROID
 	#define NO_PNG
 	#define NO_JPEG
-	#define NO_OGG
+	#ifndef LIBVORBISFILE_STATIC	//the CMake build links Ogg Vorbis in
+		#define NO_OGG
+	#endif
 #endif
 
 #ifdef _XBOX

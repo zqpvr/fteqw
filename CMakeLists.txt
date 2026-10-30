@@ -235,7 +235,22 @@ ELSE()
 ENDIF()
 
 SET(FTE_DEP_VORBISFILE true CACHE BOOL "Link against libvorbisfile.")
-IF(FTE_DEP_VORBISFILE)
+IF(FTE_DEP_VORBISFILE AND ANDROID)
+	#the NDK has no libvorbisfile, so build xiph's releases in, as the Makefile does for its static builds
+	INCLUDE(FetchContent)
+	FetchContent_Declare(ogg URL https://github.com/xiph/ogg/releases/download/v1.3.5/libogg-1.3.5.tar.gz
+		URL_HASH SHA256=0eb4b4b9420a0f51db142ba3f9c64b333f826532dc0f48c6410ae51f4799b664)
+	FetchContent_Declare(vorbis URL https://github.com/xiph/vorbis/releases/download/v1.3.7/libvorbis-1.3.7.tar.gz
+		URL_HASH SHA256=0e982409a9c3fc82ee06e08205b1355e5c6aa4c36bca58146ef399621b0ce5ab)
+	FetchContent_MakeAvailable(ogg)
+	#vorbis finds ogg with find_package, which takes these as given and then uses the existing Ogg::ogg target
+	SET(OGG_INCLUDE_DIR ${ogg_SOURCE_DIR}/include CACHE PATH "" FORCE)
+	SET(OGG_LIBRARY ogg CACHE STRING "" FORCE)
+	FetchContent_MakeAvailable(vorbis)
+	SET(VORBISFILE_LIBRARY vorbisfile)
+	SET(FTE_LIB_DEFINES ${FTE_LIB_DEFINES};LIBVORBISFILE_STATIC)
+	SET(FTE_LIBS ${FTE_LIBS} vorbisfile)
+ELSEIF(FTE_DEP_VORBISFILE)
 	FIND_LIBRARY(VORBISFILE_LIBRARY NAMES vorbisfile)
 ENDIF()
 IF(NOT VORBISFILE_LIBRARY)
