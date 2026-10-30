@@ -64,7 +64,15 @@ JNIEXPORT jint JNICALL Java_com_fteqw_FTEDroidEngine_paintaudio(JNIEnv *env, jcl
 		sc->snd_sent += len;
 	}
 	else
-		offset = len;	/*so the playback thread ends up blocked properly*/
+	{	/*silence, so the playback thread still blocks properly without replaying whatever was last in its buffer*/
+		jbyte *silence = (*env)->GetByteArrayElements(env, stream, NULL);
+		if (silence)
+		{
+			memset(silence, 0, len);
+			(*env)->ReleaseByteArrayElements(env, stream, silence, 0);
+		}
+		offset = len;
+	}
 	return offset;
 }
 
