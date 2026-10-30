@@ -481,6 +481,9 @@ void IN_Commands(void)
 				fl = m->oldpos[0] * vid.width / vid.pixelwidth;		mousecursor_x = bound(0, fl, vid.width-1);
 				fl = m->oldpos[1] * vid.height / vid.pixelheight;	mousecursor_y = bound(0, fl, vid.height-1);
 
+				//hand the position on with the press even if it has not moved since the
+				//last touch, or a tap on the same spot never says where it landed
+				m->updated = true;
 				m->touchtime = Sys_DoubleTime();
 				m->moveddist = 0;
 				if (ev->keyboard.scancode==K_TOUCH)
