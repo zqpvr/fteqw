@@ -90,8 +90,23 @@ enum controllertype_e INS_GetControllerType(int id)
 {
 	return CONTROLLER_NONE;
 }
+static void Droid_Vibrate(int ms, int amplitude)
+{	//the phone's own motor, standing in for a controller's
+	jobject act = sys_activity;
+	JNIEnv *jni;
+	if (JNI_OK == (*sys_javavm)->AttachCurrentThread(sys_javavm, &jni, NULL))
+	{
+		jmethodID func = (*jni)->GetMethodID(jni, (*jni)->GetObjectClass(jni, act), "vibrate", "(II)V" );
+		if (func)
+			(*jni)->CallVoidMethod(jni, act, func, ms, amplitude);
+		(*sys_javavm)->DetachCurrentThread(sys_javavm);
+	}
+}
 void INS_Rumble(int joy, uint16_t amp_low, uint16_t amp_high, uint32_t duration)
-{
+{	//NZ:P's rumble peaks at 2000 of 65535, which a controller feels but a phone motor barely does, so 2000 is half the motor's strength
+	int amplitude = max(amp_low, amp_high) * 255 / 4000;
+	if (duration && amplitude > 0)
+		Droid_Vibrate(duration, bound(1, amplitude, 255));
 }
 void INS_RumbleTriggers(int joy, uint16_t left, uint16_t right, uint32_t duration)
 {

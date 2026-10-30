@@ -497,6 +497,24 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 	};
 
 
+	//rumble from the game, called from C. Amplitude is 1-255.
+	private android.os.Vibrator vibrator;
+	public void vibrate(int ms, int amplitude)
+	{
+		try
+		{
+			if (vibrator == null)
+				vibrator = (android.os.Vibrator)getSystemService(android.content.Context.VIBRATOR_SERVICE);
+			if (vibrator == null || !vibrator.hasVibrator())
+				return;
+			if (android.os.Build.VERSION.SDK_INT >= 26)
+				vibrator.vibrate(android.os.VibrationEffect.createOneShot(ms, vibrator.hasAmplitudeControl() ? amplitude : android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+			else
+				vibrator.vibrate(ms);
+		}
+		catch (Throwable t) {}
+	}
+
 	//keyboard stuff, called from C.
 	public void showKeyboard(int softkeyflags)
 	{	//needed because the ndk's ANativeActivity_showSoftInput is defective
