@@ -96,12 +96,10 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 
 //		byte[] nativeSavedState = savedInstanceState != null
 //			? savedInstanceState.getByteArray(KEY_NATIVE_SAVED_STATE) : null;
-		//Bundled game data ships inside the APK (assets/nzp). Extract it to the writable data
-		//dir on first run (or when the bundled version changes) BEFORE startup() so the engine
-		//finds it. Fast no-op once installed (version-file check). The render surface is only
-		//created after onCreate returns, so doing this here keeps startup ordering correct.
+		//The game data is packed into the root of the APK, which the engine mounts and reads in
+		//place (-basepack). Only what the game writes goes in the data dir.
 		String dataPath = getAbsolutePath(getExternalFilesDir(null));
-		try { extractGameData(dataPath); } catch (Exception e) { e.printStackTrace(); }
+		removeUnpackedData(dataPath);
 		writeSafeArea(dataPath);
 
 		startup(dataPath, getNativeLibraryDirectory());
@@ -182,6 +180,7 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 		catch (Throwable t) {}
 		try
 		{
+			new java.io.File(dataPath, "nzp").mkdirs();
 			java.io.FileWriter out = new java.io.FileWriter(new java.io.File(dataPath, "nzp/safearea.cfg"));
 			out.write("set cl_safearea " + share + "\n");
 			out.close();
@@ -228,62 +227,49 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 			setFullscreen();
 	}
 
-	//Copies assets/nzp/** out of the APK into <dataPath>/nzp on first run (or when the bundled
-	//version differs). The engine reads loose files from the data dir, so this makes a fully
-	//self-contained APK. Reads the APK zip directly - fast and handles AGP asset compression.
-	private void extractGameData(String dataPath) throws Exception
+	//Older builds unpacked the game data into <dataPath>/nzp, and the data dir is searched
+	//before the APK, so those copies would shadow the files the APK carries now. One of them
+	//can be a progs.dat from a Vril nightly, which the server prefers over qwprogs.dat and
+	//cannot run. So, once, delete every unpacked file that the APK still has, and that
+	//progs.dat. What the game wrote itself (settings, achievements, downloads) stays.
+	private void removeUnpackedData(String dataPath)
 	{
 		if (dataPath == null)
 			return;
-		final String prefix = "assets/nzp/";
-		java.util.zip.ZipFile zip = new java.util.zip.ZipFile(getPackageCodePath());
+		java.io.File nzp = new java.io.File(dataPath, "nzp");
+		java.io.File stamp = new java.io.File(nzp, "version.txt");
+		if (!stamp.exists())
+			return;	//nothing was unpacked, or this has already run
 		try
 		{
-			//skip extraction if already installed at the same version
-			String bundledVer = readZipString(zip, prefix + "version.txt");
-			java.io.File verFile = new java.io.File(dataPath, "nzp/version.txt");
-			if (bundledVer != null && verFile.exists() && bundledVer.equals(readFileString(verFile)))
-				return;
-			android.util.Log.i("FTEDroid", "extracting bundled game data...");
-			byte[] buf = new byte[65536];
-			java.util.Enumeration<? extends java.util.zip.ZipEntry> en = zip.entries();
-			while (en.hasMoreElements())
+			java.util.zip.ZipFile apk = new java.util.zip.ZipFile(getPackageCodePath());
+			try
 			{
-				java.util.zip.ZipEntry ze = en.nextElement();
-				String name = ze.getName();
-				if (!name.startsWith(prefix))
-					continue;
-				java.io.File out = new java.io.File(dataPath, name.substring("assets/".length()));
-				if (ze.isDirectory()) { out.mkdirs(); continue; }
-				if (out.getParentFile() != null) out.getParentFile().mkdirs();
-				java.io.InputStream is = zip.getInputStream(ze);
-				java.io.FileOutputStream os = new java.io.FileOutputStream(out);
-				int n;
-				while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
-				os.close();
-				is.close();
+				java.util.ArrayList<java.io.File> dirs = new java.util.ArrayList<java.io.File>();
+				dirs.add(nzp);
+				int root = nzp.getPath().length() + 1;
+				for (int i = 0; i < dirs.size(); i++)
+				{
+					java.io.File[] files = dirs.get(i).listFiles();
+					if (files == null)
+						continue;
+					for (java.io.File f : files)
+					{
+						String name = f.getPath().substring(root);
+						if (f.isDirectory())
+							dirs.add(f);
+						else if (!f.equals(stamp) && apk.getEntry(name) != null)
+							f.delete();
+					}
+				}
+				for (int i = dirs.size() - 1; i > 0; i--)
+					dirs.get(i).delete();	//only goes if it is now empty
 			}
-			android.util.Log.i("FTEDroid", "game data extracted.");
+			finally { apk.close(); }
 		}
-		finally { zip.close(); }
-	}
-	private static String readZipString(java.util.zip.ZipFile zip, String entry) throws Exception
-	{
-		java.util.zip.ZipEntry ze = zip.getEntry(entry);
-		if (ze == null) return null;
-		return streamToString(zip.getInputStream(ze));
-	}
-	private static String readFileString(java.io.File f) throws Exception
-	{
-		return streamToString(new java.io.FileInputStream(f));
-	}
-	private static String streamToString(java.io.InputStream is) throws Exception
-	{
-		java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
-		byte[] b = new byte[4096]; int n;
-		while ((n = is.read(b)) > 0) bo.write(b, 0, n);
-		is.close();
-		return bo.toString("UTF-8").trim();
+		catch (Exception e) { e.printStackTrace(); return; }
+		new java.io.File(nzp, "progs.dat").delete();
+		stamp.delete();	//last, so an interrupted run is redone
 	}
 
 	//audio: FTENativeActivity's frame loop runs in native code, so (unlike FTEDroidActivity)
