@@ -12,7 +12,7 @@ because engine work needs history. A ten-thousand-line diff regenerated after
 every edit has no blame, nothing to bisect, and no way to offer a single fix
 upstream.
 
-Used by [nzportable-android](https://github.com/zqpvr/nzportable-android), which
+Used by [nzportable-android](https://git.zqpvr.net/zqpvr01/nzportable-android), which
 is where the game code, the data and the APK live.
 
 ## What this fork changes
@@ -49,7 +49,7 @@ usually still holds the value being read.
 
 Not built on its own. It is compiled as part of the Android app, which drives
 CMake and the NDK through Gradle. See
-[nzportable-android](https://github.com/zqpvr/nzportable-android).
+[nzportable-android](https://git.zqpvr.net/zqpvr01/nzportable-android).
 
 The build config is `engine/common/config_nzportable.h`, which is where
 `RTLIGHTS` is switched on.
