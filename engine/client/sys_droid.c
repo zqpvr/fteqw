@@ -564,9 +564,7 @@ static void setCursorVisibility(jboolean visible)
 static void FTENativeActivity_keypress(JNIEnv *env, jobject this, jint devid, jboolean down, jint keycode, jint unicode)
 {
 	int qkeycode = mapkey(keycode);
-	//devid arrives normalised from Java: 0 = keyboard/system, 1 = gamepad. The game keys
-	//controller glyphs + aim assist off devid>0, and in_forceseat (set in the manifest)
-	//routes the non-zero devid back to player 1 instead of a non-existent split-screen seat.
+	//Java sends 0 for keyboard and system keys, 1 for a gamepad; in_forceseat keeps the pad on player 1
 	if (devid < 0)
 		devid = 0;
 	IN_KeyEvent(devid, down, qkeycode, unicode);
@@ -619,12 +617,7 @@ static void FTENativeActivity_motion(JNIEnv *env, jobject this, jint ptrid, jint
 		break;
 	};
 }
-//Axis indices arriving here match fte's GPAXIS_* order (see the Java handleJoystickAxis
-//call order): 0=LeftX 1=LeftY 2=LeftTrigger 3=RightX 4=RightY 5=RightTrigger.
-//The SDL desktop build turns stick directions into K_GP_*_THUMB_* key presses so menus can
-//be navigated with the stick; the Android path didn't, which is why menus ignored the pad.
-//Stick directions -> K_GP_*_THUMB_* keys (like the SDL build). These have no in-game default
-//bind, so they don't disturb analog movement; NZ:P's menu handles them for stick navigation.
+//axes arrive in GPAXIS_* order; as in the SDL build, stick directions also press K_GP_*_THUMB_* keys so the pad can drive menus
 static const int sys_axispos[6] = {K_GP_LEFT_THUMB_RIGHT, K_GP_LEFT_THUMB_DOWN, K_GP_LEFT_TRIGGER,  K_GP_RIGHT_THUMB_RIGHT, K_GP_RIGHT_THUMB_DOWN, K_GP_RIGHT_TRIGGER};
 static const int sys_axisneg[6] = {K_GP_LEFT_THUMB_LEFT,  K_GP_LEFT_THUMB_UP,   0,                  K_GP_RIGHT_THUMB_LEFT,  K_GP_RIGHT_THUMB_UP,   0};
 static unsigned int sys_axisbtn_pos, sys_axisbtn_neg;	//currently-held bit per axis
@@ -680,11 +673,7 @@ static int FTEDroid_MainThread(void *arg)
 		parms.basedir = sys_basedir;	/*filled in later*/
 		parms.argc = read_apk_path(sys_basepak, sizeof(sys_basepak))?3:1;
 		parms.argv = args;
-		//Embed NZ:P's manifest (mirrors the desktop default.fmf). The desktop build reads this
-		//from a file; the Android build has no such file, so without this the engine used a
-		//default config name and never exec'd nzportable.cfg - the config that holds the proper
-		//controller binds/sensitivities and is where settings are saved. mainconfig fixes both
-		//the controller layout and settings persistence.
+		//NZ:P's desktop default.fmf, which has no file to come from here, plus two Android defaults
 		parms.manifest =
 			"game nzp\n"
 			"name \"Nazi Zombies Portable\"\n"
@@ -692,9 +681,7 @@ static int FTEDroid_MainThread(void *arg)
 			"mainconfig \"nzportable.cfg\"\n"
 			"disablehomedir 1\n"
 			"set in_forceseat 1\n"		//all local input drives player 1 (we tag the pad as devid 1)
-			"-set in_aimassist 1\n";	//aim assist on by default (user-overridable)
-			//NB: controller binds live in nzportable.cfg, not here - manifest defaultoverrides
-			//run before the mainconfig, so binds set here would just get overwritten by it.
+			"-set in_aimassist 1\n";	//aim assist on by default (user-overridable); binds belong in nzportable.cfg, which runs after this
 #ifdef CONFIG_MANIFEST_TEXT
 		parms.manifest = CONFIG_MANIFEST_TEXT;
 #endif
@@ -798,11 +785,7 @@ static int FTEDroid_MainThread(void *arg)
 		{
 			if (Key_Dest_Has(kdm_console|kdm_message))
 				t |= 1;
-			//upstream also raises the keyboard whenever the game view has focus while
-			//disconnected, on the assumption there is nothing to do but type. That is
-			//true of a bare engine, but this port has menus and on-screen controls, and
-			//the state is briefly ca_disconnected while a connection is being made -- so
-			//it threw the keyboard up over the game every time you joined a server.
+			//not whenever disconnected, as upstream does: joining passes through ca_disconnected
 			if (sys_osk.ival)
 				t |= 2;
 		}
