@@ -124,19 +124,30 @@ public class FTENativeActivity extends android.app.Activity implements android.v
 		audioStart();
 	}
 
-	//Immersive fullscreen: hide the status + navigation bars. STICKY lets a swipe reveal them
-	//transiently. setSystemUiVisibility is deprecated but still the most broadly-compatible way.
+	//Immersive fullscreen: hide the status and navigation bars, and let a swipe reveal them
+	//transiently. Android 11 replaced setSystemUiVisibility with WindowInsetsController.
 	private void setFullscreen()
 	{
 		try
 		{
-			getWindow().getDecorView().setSystemUiVisibility(
-				  0x00000004	//SYSTEM_UI_FLAG_FULLSCREEN
-				| 0x00000002	//SYSTEM_UI_FLAG_HIDE_NAVIGATION
-				| 0x00001000	//SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-				| 0x00000100	//SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-				| 0x00000200	//SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-				| 0x00000400);	//SYSTEM_UI_FLAG_LAYOUT_STABLE
+			if (android.os.Build.VERSION.SDK_INT >= 30)
+			{
+				getWindow().setDecorFitsSystemWindows(false);
+				android.view.WindowInsetsController c = getWindow().getInsetsController();
+				if (c != null)
+				{
+					c.hide(android.view.WindowInsets.Type.systemBars());
+					c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+				}
+			}
+			else
+				getWindow().getDecorView().setSystemUiVisibility(
+					  0x00000004	//SYSTEM_UI_FLAG_FULLSCREEN
+					| 0x00000002	//SYSTEM_UI_FLAG_HIDE_NAVIGATION
+					| 0x00001000	//SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+					| 0x00000100	//SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+					| 0x00000200	//SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+					| 0x00000400);	//SYSTEM_UI_FLAG_LAYOUT_STABLE
 		}
 		catch (Throwable t) {}
 
