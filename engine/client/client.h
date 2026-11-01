@@ -1482,6 +1482,7 @@ qboolean CL_MayLerp(void);
 //
 #ifdef CSQC_DAT
 qboolean CSQC_Inited(void);
+qboolean CSQC_HasFunction(const char *name);
 void	 CSQC_RendererRestarted(qboolean initing);
 qboolean CSQC_UnconnectedOkay(qboolean inprinciple);
 qboolean CSQC_UnconnectedInit(void);

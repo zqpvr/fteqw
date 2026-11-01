@@ -1355,6 +1355,11 @@ static int CL_LoadModels(int stage, qboolean dontactuallyload)
 							//hopefully this'll make it more robust.
 							//csqc is expected to use it's own huds, or to run on decent servers. :p
 		}
+#ifdef ANDROID
+		//a server running another version of the game code sends its own, and without touch controls in it
+		//a touchscreen has no way to play, so the engine draws some
+		IN_TouchFallback(!CSQC_HasFunction("Touch_InputEvent"));
+#endif
 		endstage();
 	}
 #endif

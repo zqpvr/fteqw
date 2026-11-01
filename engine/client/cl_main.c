@@ -2486,6 +2486,9 @@ void CL_Disconnect (const char *reason)
 	if (q3)
 		q3->cl.Disconnect(cls.sockets);
 #endif
+#ifdef ANDROID
+	IN_TouchFallback(false);
+#endif
 #ifdef CSQC_DAT
 	CSQC_Shutdown();
 #endif

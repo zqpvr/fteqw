@@ -7873,6 +7873,11 @@ int QDECL CSQC_PRFileSize (const char *path)
 	return COM_FileSize(path);
 }
 
+qboolean CSQC_HasFunction(const char *name)
+{
+	return csqcprogs && PR_FindFunction(csqcprogs, name, PR_ANY);
+}
+
 qboolean CSQC_Inited(void)
 {
 	if (csqcprogs)

@@ -424,6 +424,53 @@ qboolean IN_Touch_MouseIsAbs(unsigned int devid)
 	return false;
 }
 
+#ifdef ANDROID
+//On-screen controls for when the game code has none of its own, which is the case on a server
+//running another version of it. The buttons are showpics running NZ:P's commands, and a touch
+//that starts anywhere else on the left half is a movement stick, feeding a controller's axes.
+static qboolean touchfallback;
+static int touchstick = -1;	//the pointer holding the stick
+static vec2_t touchstick_anchor;
+#define TOUCHSTICK_JOY (MAXJOYSTICKS-1)
+
+void IN_TouchFallback(qboolean enable)
+{
+	static const struct {const char *pic; float x, y, size; const char *cmd;} buttons[] =
+	{	//laid out like the game code's own controls: x within the safe area, y and size by screen height
+		{"gfx/touch/touch_fire",		0.87,	0.80,	1.30,	"+attack"},
+		{"gfx/touch/touch_adsfire",		0.70,	0.86,	0.90,	"+button8"},
+		{"gfx/touch/btn_reload",		0.92,	0.56,	0.85,	"+button5"},
+		{"gfx/touch/btn_activate",		0.77,	0.56,	0.85,	"+button7"},
+		{"gfx/touch/touch_knife",		0.92,	0.36,	0.85,	"+button6"},
+		{"gfx/touch/touch_grenade",		0.77,	0.36,	0.85,	"+button3"},
+		{"gfx/touch/btn_jump",			0.92,	0.17,	0.80,	"impulse 10"},
+		{"gfx/touch/touch_swap",		0.77,	0.17,	0.80,	"+button4"},
+		{"gfx/touch/touch_betty",		0.62,	0.17,	0.75,	"impulse 33"},
+		{"gfx/touch/touch_crouch",		0.29,	0.85,	0.90,	"impulse 30"},
+	};
+	cvar_t *safearea = Cvar_FindVar("cl_safearea");
+	float safe = (safearea?safearea->value:0) * vid.width;
+	float b = vid.height * 0.13;
+	size_t i;
+
+	if (enable == touchfallback)
+		return;
+	touchfallback = enable;
+	touchstick = -1;
+	joy[TOUCHSTICK_JOY].axis[0] = joy[TOUCHSTICK_JOY].axis[1] = 0;
+	SCR_ShowPic_RemoveEngine();
+	if (!enable)
+		return;
+	for (i = 0; i < countof(buttons); i++)
+	{
+		int s = buttons[i].size * b;
+		int x = safe + (vid.width - 2*safe) * buttons[i].x - s/2;
+		int y = vid.height * buttons[i].y - s/2;
+		SCR_ShowPic_AddEngine(buttons[i].pic, va("touchfallback%u", (unsigned int)i), x, y, "tl", s, s, buttons[i].cmd);
+	}
+}
+#endif
+
 /*a 'pointer' is either a multitouch pointer, or a separate device
 note that mice use the keyboard button api, but separate devices*/
 void IN_Commands(void)
@@ -440,6 +487,16 @@ void IN_Commands(void)
 		{
 		case IEV_KEYRELEASE:
 //Con_Printf("IEV_KEYDOWN %i: %i '%c'\n", ev->devid, ev->keyboard.scancode, ev->keyboard.unicode?ev->keyboard.unicode:' ');
+#ifdef ANDROID
+			if ((int)ev->devid == touchstick && ev->keyboard.scancode == K_TOUCH)
+			{	//letting go of the stick
+				if (touchcursor == touchstick)
+					touchcursor = -1;
+				touchstick = -1;
+				joy[TOUCHSTICK_JOY].axis[0] = joy[TOUCHSTICK_JOY].axis[1] = 0;
+				break;
+			}
+#endif
 			if (ev->keyboard.scancode == -1)
 			{
 				int i;
@@ -490,6 +547,18 @@ void IN_Commands(void)
 					m->touchkey = K_TOUCH;
 				else
 					m->touchkey = 0;
+#ifdef ANDROID
+				if (touchfallback && touchstick < 0 && ev->keyboard.scancode == K_TOUCH
+					&& m->oldpos[0] < vid.pixelwidth/2 && !SCR_ShowPics_ClickCommand(mousecursor_x, mousecursor_y, true))
+				{	//the stick, rather than a look drag or a button
+					touchstick = ev->devid;
+					touchstick_anchor[0] = m->oldpos[0];
+					touchstick_anchor[1] = m->oldpos[1];
+					m->touchtime = 0;
+					m->touchkey = 0;
+					break;
+				}
+#endif
 			}
 			Key_Event(ev->devid, ev->keyboard.scancode, ev->keyboard.unicode, true);
 			break;
@@ -572,6 +641,18 @@ void IN_Commands(void)
 					m->oldpos[0] = ev->mouse.x;
 					m->oldpos[1] = ev->mouse.y;
 				}
+
+#ifdef ANDROID
+				if ((int)ev->devid == touchstick)
+				{	//full tilt an eighth of the screen's height from where the thumb landed
+					float r = vid.pixelheight * 0.12;
+					joy[TOUCHSTICK_JOY].axis[0] = bound(-1, (ev->mouse.x - touchstick_anchor[0]) / r, 1);
+					joy[TOUCHSTICK_JOY].axis[1] = bound(-1, (ev->mouse.y - touchstick_anchor[1]) / r, 1);
+					m->oldpos[0] = ev->mouse.x;
+					m->oldpos[1] = ev->mouse.y;
+					break;
+				}
+#endif
 
 				if (m->touchtime)
 				{	//only do this when its actually held in some form...

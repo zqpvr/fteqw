@@ -82,6 +82,8 @@ void SCR_ShowPic_Hide(void);
 void SCR_ShowPic_Move(void);
 void SCR_ShowPic_Update(void);
 void SCR_ShowPic_ClearAll(qboolean persistflag);
+void SCR_ShowPic_RemoveEngine(void);
+void SCR_ShowPic_AddEngine(const char *imgname, const char *name, int x, int y, const char *zone, int w, int h, const char *tcommand);
 const char *SCR_ShowPics_ClickCommand(float cx, float cy, qboolean loadtouch);
 void SCR_ShowPic_Script_f(void);
 void SCR_ShowPic_Remove_f(void);

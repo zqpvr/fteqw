@@ -1512,8 +1512,10 @@ const char *SCR_ShowPics_ClickCommand(float cx, float cy, qboolean istouch)
 		}
 	}
 
+#ifndef ANDROID	//the game code draws touch controls, or the engine's fallback does; FTE's generic layout would sit on top
 	if (tryload)
 		Cbuf_AddText("exec touch.cfg\n", RESTRICT_LOCAL);
+#endif
 	return best;
 }
 
@@ -1697,6 +1699,40 @@ static int SCR_ShowPic_MapZone(char *zone)
 
 	return atoi(zone);
 }
+//the engine's own pics: persist 2, so neither a map change nor showpic_removeall (which a config reload runs) clears them
+void SCR_ShowPic_RemoveEngine(void)
+{
+	showpic_t **link, *sp;
+	for (link = &showpics; (sp=*link); )
+	{
+		if (sp->persist != 2)
+		{
+			link = &sp->next;
+			continue;
+		}
+		*link = sp->next;
+		Z_Free(sp->name);
+		Z_Free(sp->picname);
+		Z_Free(sp->tcommand);
+		Z_Free(sp);
+	}
+}
+void SCR_ShowPic_AddEngine(const char *imgname, const char *name, int x, int y, const char *zone, int w, int h, const char *tcommand)
+{
+	showpic_t *sp = SCR_ShowPic_Find((char*)name);
+	Z_Free(sp->picname);
+	Z_Free(sp->tcommand);
+	sp->picname = Z_StrDup(imgname);
+	sp->tcommand = Z_StrDup(tcommand);
+	sp->zone = SCR_ShowPic_MapZone((char*)zone);
+	sp->x = x;
+	sp->y = y;
+	sp->w = w;
+	sp->h = h;
+	sp->fadedelay = 0;
+	sp->persist = 2;
+}
+
 void SCR_ShowPic_Script_f(void)
 {
 	char *imgname;
@@ -3537,6 +3573,9 @@ void SCR_DrawTwoDimensional(qboolean nohud)
 	{
 		SCR_DrawDisk();
 		SCR_DrawFPS ();
+#ifdef ANDROID
+		SCR_ShowPics_Draw();	//the fallback touch controls, over game code that draws its own hud
+#endif
 		SCR_CheckDrawCenterString ();
 	}
 	else if (cl.intermissionmode == IM_NQFINALE || cl.intermissionmode == IM_NQCUTSCENE || cl.intermissionmode == IM_H2FINALE)

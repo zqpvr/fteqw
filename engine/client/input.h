@@ -30,6 +30,9 @@ void IN_Commands (void);
 // oportunity for devices to stick commands on the script buffer
 
 void IN_Touch_BlockGestures(unsigned int devid);	//prevents any gestures from being generated from the same touch event.
+#ifdef ANDROID
+void IN_TouchFallback(qboolean enable);	//engine-drawn controls, for game code that has no touch controls of its own
+#endif
 int IN_Touch_Fallback(unsigned int devid);		//decides whether a tap should be attack/jump according to m_touchstrafe
 qboolean IN_Touch_MouseIsAbs(unsigned int devid);
 
